@@ -1,0 +1,24 @@
+{
+  "name": "triplistener",
+  "version": "1.0.0",
+  "description": "Backend trip monitoring system",
+  "main": "index.js",
+  "scripts": {
+    "test": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sensudipta/tripListener.git"
+  },
+  "keywords": [
+    "tripSystem",
+    "trip",
+    "routes"
+  ],
+  "author": "Sudipta Sen",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sensudipta/tripListener/issues"
+  },
+  "homepage": "https://github.com/sensudipta/tripListener#readme"
+}
