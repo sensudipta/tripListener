@@ -128,3 +128,6 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+# liveDB.js with sensitive credentials
+liveDB.js
+sms.js
