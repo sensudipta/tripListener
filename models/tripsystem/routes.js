@@ -129,6 +129,34 @@ const routeSchema = new Schema({
         routeViolationThreshold: { type: Number, default: 2 },
         reverseDrivingThreshold: { type: Number, default: 5 },
     },
+    notifications: {
+        sms: [{
+            name: { type: String },
+            number: { type: String },
+            categories: [{
+                type: String,
+                enum: ['tripStage', 'activeStatus', 'ruleViolation']
+            }]
+        }],
+        whatsApp: [{
+            name: { type: String }, number: { type: String }, categories: [{
+                type: String,
+                enum: ['tripStage', 'activeStatus', 'ruleViolation', 'finalReport']
+            }]
+        }],
+        email: [{
+            name: { type: String }, email: { type: String }, categories: [{
+                type: String,
+                enum: ['tripStage', 'activeStatus', 'ruleViolation', 'finalReport']
+            }]
+        }],
+        push: [{
+            name: { type: String }, token: { type: String }, categories: [{
+                type: String,
+                enum: ['tripStage', 'activeStatus', 'ruleViolation']
+            }]
+        }],
+    },
     trips: [{ type: ObjectId, ref: 'Trip' }]
 }, {
     timestamps: true

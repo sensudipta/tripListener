@@ -31,15 +31,24 @@ const tripSchema = new Schema({
     rules: {
         drivingStartTime: { type: String, default: '00:00:00' },
         drivingEndTime: { type: String, default: '23:59:59' },
-        drivingTimeStatus: { type: String, default: 'Good' },
         speedLimit: { type: Number, default: 60 },
-        speedStatus: { type: String, default: 'Good' },
         maxHaltTime: { type: Number, default: 60 },
-        haltTimeStatus: { type: String, default: 'Good' },
         routeViolationThreshold: { type: Number, default: 2 },
-        routeViolationStatus: { type: String, default: 'Good' },
-        reverseDrivingThreshold: { type: Number, default: 5 },
-        reverseDrivingStatus: { type: String, default: 'Good' },
+    },
+    ruleStatus: {
+        drivingTimeStatus: { type: String, default: 'Normal' },
+        speedStatus: { type: String, default: 'Normal' },
+        haltTimeStatus: { type: String, default: 'Normal' },
+        routeViolationStatus: { type: String, default: 'Normal' },
+        reverseTravelPath: {
+            type: {
+                type: String,
+                enum: ['LineString'],
+                required: true
+            },
+            coordinates: { type: [[Number]], required: true },
+        },
+        reverseTravelDistance: { type: Number, default: 0 },
     },
 
     // Trip Progress & Status
@@ -47,14 +56,29 @@ const tripSchema = new Schema({
 
     actualStartTime: { type: Date },
     actualEndTime: { type: Date },
+    endReason: {
+        type: String,
+        enum: ['Trip Completed', 'Trip Aborted', 'Trip Cancelled'],
+        default: 'Trip Completed',
+    },
+    abortReason: {
+        type: String,
+    },
+    endLocation: {
+        coordinates: {
+            type: [Number], // [longitude, latitude]
+            index: '2dsphere'
+        },
+        address: String
+    },
 
     activeStatus: {
         type: String,
         enum: ['Inactive',
             'Reached Origin', 'Detained At Origin',
-            'Reached Destination', 'Detained At Destination',
             'Reached Via Location', 'Detained At Via Location',
-            'Running On Route', 'Running Off Route', 'Halted',
+            'Running On Route', 'Route Violated', 'Halted',
+            'Reached Destination', 'Detained At Destination',
         ],
         default: 'Inactive',
         required: true,
@@ -62,9 +86,33 @@ const tripSchema = new Schema({
 
     tripStage: {
         type: String,
-        enum: ['Planned', 'Start Delayed', 'Active', 'Completed', 'Aborted', 'Cancelled'],
+        enum: ['Planned', 'Start Delayed', 'Active',
+            'Completed', 'Aborted', 'Cancelled'],
         default: 'Planned',
         required: true,
+    },
+
+    currentSignificantLocation: {
+        location: {
+            type: {
+                type: String,
+                enum: ['Point'],
+                required: true
+            },
+            coordinates: {
+                type: [Number], // [longitude, latitude]
+                required: true
+            }
+        },
+        locationName: { type: String },
+        locationType: {
+            type: String,
+            enum: ['startLocation', 'endLocation', 'viaLocation'],
+            required: true
+        },
+        entryTime: { type: Date },
+        exitTime: { type: Date },
+        dwellTime: { type: Number },
     },
 
     significantLocations: [{
@@ -94,19 +142,15 @@ const tripSchema = new Schema({
         eventType: {
             type: String,
             enum: [
-                'OverSpeed', 'Night Driving', 'Route Violation',
-                'Reverse Driving', 'Max Halt Violation',
-                'Reached Origin', 'Detained At Origin',
-                'Reached Destination', 'Detained At Destination',
-                'Reached Via Location', 'Detained At Via Location',
-                'Running On Route', 'Running Off Route', 'Halted',
-                'Activated', 'Completed', 'Aborted', 'Cancelled',
+                'tripStage', 'activeStatus', 'ruleViolation', 'fuelEvent'
             ],
         },
+        eventName: { type: String },
         eventTime: { type: Date },
         eventStartTime: { type: Date },
         eventEndTime: { type: Date },
         eventDuration: { type: Number },
+        eventDistance: { type: Number },
         eventLocation: {
             type: {
                 type: String,
@@ -118,7 +162,14 @@ const tripSchema = new Schema({
                 required: true
             }
         },
-
+        eventPath: {
+            type: {
+                type: String,
+                enum: ['LineString'],
+                required: true
+            },
+            coordinates: { type: [[Number]], required: true },
+        },
     }],
 
     tripPath: [{
@@ -146,9 +197,10 @@ const tripSchema = new Schema({
     completionPercentage: { type: Number, default: 0 },
     estimatedTimeOfArrival: Date,
     parkedDuration: { type: Number, default: 0 }, // minutes
-    actualRunTime: { type: Number, default: 0 }, // minutes
+    runDuration: { type: Number, default: 0 }, // minutes
     averageSpeed: { type: Number, default: 0 }, // km/h
     topSpeed: { type: Number, default: 0 }, // km/h
+    truckRunDistance: { type: Number, default: 0 }, // kilometers
 
 
     haltStartTime: { type: Date },
@@ -186,25 +238,29 @@ const tripSchema = new Schema({
             coordinates: { type: [Number], required: true },
         }
     }],
+    currentFuelLevel: { type: Number, default: 0 }, // liters
     fuelConsumption: { type: Number, default: 0 }, // liters
     fuelEfficiency: { type: Number, default: 0 }, // km/liter
     fuelStatusUpdateTime: { type: Date },
 
-    endReason: {
-        type: String,
-        enum: ['TRIP_COMPLETED', 'TRIP_ABORTED', 'TRIP_CANCELLED'],
-        default: 'TRIP_COMPLETED',
-    },
-    abortReason: {
-        type: String,
-    },
-    endLocation: {
-        coordinates: {
-            type: [Number], // [longitude, latitude]
-            index: '2dsphere'
-        },
-        address: String
-    },
+
+    sentNotifications: [
+        {
+            type: {
+                type: String,
+                enum: ['sms', 'email', 'whatsApp', 'push'],
+                required: true
+            },
+            category: {
+                type: String,
+                enum: ['tripStage', 'activeStatus', 'ruleViolation', 'finalReport'],
+                required: true
+            },
+            recipient: { name: { type: String }, number: { type: String } },
+            message: { type: String },
+            sentTime: { type: Date },
+        }
+    ],
 }, {
     timestamps: true
 });

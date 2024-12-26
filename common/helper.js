@@ -32,9 +32,71 @@ function isPointInPolygon(point, polygon) {
     return inside;
 }
 
+// Helper functions
+function findNearestPointIndex(point, routeCoordinates) {
+    let minDistance = Infinity;
+    let nearestIndex = 0;
+
+    routeCoordinates.forEach((coord, index) => {
+        const distance = getLengthBetweenPoints(
+            { latitude: point.lat, longitude: point.lng },
+            { latitude: coord[1], longitude: coord[0] }
+        );
+        if (distance < minDistance) {
+            minDistance = distance;
+            nearestIndex = index;
+        }
+    });
+
+    return nearestIndex;
+}
+
+function calculatePathDistance(pathPoints) {
+    let distance = 0;
+    for (let i = 1; i < pathPoints.length; i++) {
+        const p1 = { latitude: pathPoints[i - 1].lat, longitude: pathPoints[i - 1].lng };
+        const p2 = { latitude: pathPoints[i].lat, longitude: pathPoints[i].lng };
+        distance += getLengthBetweenPoints(p1, p2);
+    }
+    return distance;
+}
+
+function checkLocation(location, truckPoint) {
+    try {
+        if (location.locationType === 'zone') {
+            // For zone type, check if point is inside polygon
+            return isPointInPolygon(truckPoint, location.zoneCoordinates);
+        } else if (location.locationType === 'point') {
+            // For point type, check if within trigger radius
+            const locationPoint = {
+                lat: location.location.coordinates[1],
+                lng: location.location.coordinates[0]
+            };
+            const distance = getLengthBetweenPoints(truckPoint, locationPoint);
+            return distance <= location.triggerRadius;
+        }
+        return false;
+    } catch (err) {
+        console.error('Error in checkLocation:', err);
+        return false;
+    }
+}
+
+// Helper function for tripStatusChecker
+function determineMovingStatus(movementStatus, routeViolationStatus) {
+    if (movementStatus === 'Halted') return 'Halted';
+    if (movementStatus === 'Moving') {
+        return routeViolationStatus === 'Violated' ? 'Route Violated' : 'Running On Route';
+    }
+    return 'Unknown';
+}
 
 module.exports = {
     getLengthBetweenPoints,
-    isPointInPolygon
+    isPointInPolygon,
+    findNearestPointIndex,
+    calculatePathDistance,
+    checkLocation,
+    determineMovingStatus
 }
 
