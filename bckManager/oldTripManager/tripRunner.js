@@ -1,9 +1,9 @@
 const mongoose = require('mongoose');
 const moment = require('moment');
-const liveDB = require('../common/liveDB');
+const liveDB = require('../../common/liveDB');
 const { TRIPDB, redis } = liveDB;
 const { Route, Trip } = require('../common/models');
-const { getLengthBetweenPoints, isPointInPolygon } = require('../common/helper');
+const { getLengthBetweenPoints, isPointInPolygon } = require('../../common/helper');
 
 let tripsToProcess = [];
 const runTime = moment().format('YYYY-MM-DD HH:mm:ss');

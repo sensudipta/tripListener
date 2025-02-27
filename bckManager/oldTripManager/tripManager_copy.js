@@ -1,10 +1,10 @@
 const mongoose = require('mongoose');
 const moment = require('moment');
-const liveDB = require('../common/liveDB');
+const liveDB = require('./common/liveDB');
 const { TRIPDB, redis } = liveDB;
-const { Route, Trip } = require('../common/models');
+const { Route, Trip } = require('./models');
 const { getLengthBetweenPoints, findNearestPointIndex,
-    calculatePathDistance, checkLocation } = require('../common/helper');
+    calculatePathDistance, checkLocation } = require('./common/helper');
 const getFuel = require('./getFuel');
 
 // Define alert types and channels
@@ -328,17 +328,18 @@ async function checkRules(rules, ruleStatus, pathPoints, truckPoint, currentHalt
     }
 }
 
-
-
 async function sendAlerts({ trip, eventType, status, metadata = {} }) {
     try {
         // Validate inputs
         if (!trip || !eventType || !status) {
-            throw new Error('Missing required alert parameters');
+            if (!trip) console.log('Missing trip parameter');
+            if (!eventType) console.log('Missing eventType parameter');
+            if (!status) console.log('Missing status parameter');
+            //throw new Error('Missing required alert parameters');
         }
-
+        console.log("Sending alerts for trip:", trip.tripName, eventType, status);
         // Determine alert recipients and channels based on event type
-        const alertConfig = await getAlertConfig(trip.alertPreferences);
+        /*const alertConfig = await getAlertConfig(trip.route.notifications);
 
         const alerts = [];
 
@@ -387,6 +388,7 @@ async function sendAlerts({ trip, eventType, status, metadata = {} }) {
         });
 
         return true;
+        */
     } catch (err) {
         logger.error('Failed to send alerts', err);
         return false;
@@ -395,34 +397,53 @@ async function sendAlerts({ trip, eventType, status, metadata = {} }) {
 
 // 7. updateTripRecord function
 async function updateTripRecord(trip, updates) {
+    console.log("In updateTripRecord", updates);
     try {
         // Validate inputs
         if (!trip?._id) {
             throw new Error('Invalid trip ID');
         }
 
-        const updateQuery = {};
         let retryCount = 0;
         const MAX_RETRIES = 3;
 
         while (retryCount < MAX_RETRIES) {
             try {
-                // Your existing update logic
+                // Construct update query
+                const updateQuery = { $set: {} };
+
+                // Handle significant events separately
                 if (updates.significantEvents) {
-                    if (!updateQuery.$push) updateQuery.$push = {};
-                    updateQuery.$push.significantEvents = { $each: updates.significantEvents };
+                    updateQuery.$push = {
+                        significantEvents: { $each: updates.significantEvents }
+                    };
                     delete updates.significantEvents;
                 }
 
-                const result = await Trip.updateOne(
+                // Add all other updates to $set
+                Object.keys(updates).forEach(key => {
+                    updateQuery.$set[key] = updates[key];
+                });
+
+                const result = await Trip.findOneAndUpdate(
                     { _id: trip._id },
                     updateQuery,
-                    { runValidators: true }  // Enable mongoose validation
+                    {
+                        new: true, // Return updated document
+                        runValidators: true
+                    }
                 );
 
-                if (result.modifiedCount === 0) {
+                if (!result) {
                     throw new Error('Trip not found or no changes made');
                 }
+
+                console.log("Trip updated successfully - Updated fields:",
+                    Object.keys(updates).reduce((acc, key) => {
+                        acc[key] = result[key];
+                        return acc;
+                    }, {})
+                );
 
                 return true;
 
@@ -437,7 +458,6 @@ async function updateTripRecord(trip, updates) {
         }
     } catch (err) {
         console.error(`Failed to update trip ${trip._id}:`, err);
-        // You might want to log to a monitoring service here
         return false;
     }
 }
@@ -448,13 +468,28 @@ function validateTripData(trip) {
         'deviceImei',
         'tripName',
         'tripStage',
+        'plannedStartTime',
         'route',
-        'rules'
+        'rules',
+        'notifications'
     ];
 
     const missingFields = requiredFields.filter(field => !trip[field]);
     if (missingFields.length > 0) {
         throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+    }
+
+    // Add route validation with more specific error message
+    if (!trip.route) {
+        throw new Error('Route object is missing');
+    }
+
+    if (!trip.route.startLocation) {
+        throw new Error('Start location is missing in route');
+    }
+
+    if (!trip.route.endLocation) {
+        throw new Error('End location is missing in route');
     }
 
     // Validate specific field formats
@@ -465,11 +500,6 @@ function validateTripData(trip) {
     if (!['Planned', 'Start Delayed', 'Active', 'Completed'].includes(trip.tripStage)) {
         throw new Error('Invalid trip stage');
     }
-
-    // Validate route data
-    if (!trip.route.startLocation || !trip.route.endLocation) {
-        throw new Error('Missing route locations');
-    }
 }
 
 // 8. main function
@@ -478,10 +508,12 @@ async function main() {
         allTrips = [];
         await mongoose.connect(TRIPDB);
         console.log("Connected to TripDB");
+        await redis.connect();
+        console.log("Connected to Redis");
 
         const trips = await Trip.find({
             tripStage: { $in: ['Planned', 'Start Delayed', 'Active'] }
-        });
+        }).populate('route');
 
         allTrips = trips;
         console.log(`Loaded ${allTrips.length} trips for processing`);
@@ -493,30 +525,28 @@ async function main() {
     }
 }
 
-
-
 // 9. mainLoop function
 async function mainLoop() {
     try {
         if (allTrips.length === 0) {
             console.log("All trips processed");
             process.exit(0);
-            return;
         }
 
         const trip = allTrips.shift();
         if (!trip) {
             console.log("No more trips to process");
-            return;
+            process.exit(0);
         }
 
+        //console.log('Trip data:', JSON.stringify(trip.route, null, 2));
         validateTripData(trip);
         console.log(`Processing trip: ${trip.tripName} (${trip.tripStage})`);
 
         // Update last check time
         const currentTime = new Date();
         trip.lastCheckTime = currentTime;
-
+        console.log("Last check time updated to:", currentTime);
         if (trip.tripStage === 'Planned' || trip.tripStage === 'Start Delayed') {
             // Process planned or delayed trips
             const tripPathData = await getTripPath(trip.deviceImei, trip.tripStage);
@@ -536,13 +566,13 @@ async function mainLoop() {
             );
 
             const { tripStage, activeStatus } = await tripStatusChecker(
-                truckPoint,
-                null,
+                trip.deviceImei,
                 updatedLocation,
                 trip.movementStatus,
                 trip.tripStage,
                 trip.activeStatus,
-                trip.route
+                trip.route,
+                trip
             );
 
             const updates = {
@@ -725,13 +755,13 @@ async function mainLoop() {
 
             // Check trip status
             const { tripStage: newTripStage, activeStatus: newActiveStatus } = await tripStatusChecker(
-                truckPoint,
-                pathPoints,
+                trip.deviceImei,
                 currentSignificantLocation,
                 trip.movementStatus,
                 trip.tripStage,
                 trip.activeStatus,
-                trip.route
+                trip.route,
+                trip
             );
 
             // Handle trip stage changes
@@ -849,8 +879,8 @@ async function mainLoop() {
             }
 
             // Check fuel status
-            if (!trip.fuelStatusUpdateTime ||
-                moment(currentTime).diff(moment(trip.fuelStatusUpdateTime), 'hours') >= 1) {
+            if (truckPoint.fuelLevel && (!trip.fuelStatusUpdateTime ||
+                moment(currentTime).diff(moment(trip.fuelStatusUpdateTime), 'hours') >= 1 || newTripStage === 'Completed')) {
                 try {
                     const fuelData = await getFuel({
                         timeFrom: trip.actualStartTime,
@@ -902,7 +932,7 @@ async function mainLoop() {
                         updates.fuelConsumption = fuelData.consumption;
                         updates.fuelEfficiency = fuelData.mileage;
                         updates.fuelStatusUpdateTime = currentTime;
-                        updates.currentFuelLevel = fuelData.endVol;
+                        updates.currentFuelLevel = truckPoint.fuelLevel;//fuelData.endVol;
                     }
                 } catch (err) {
                     console.error(`Error updating fuel data for trip ${trip.tripName}:`, err);
@@ -912,6 +942,7 @@ async function mainLoop() {
 
 
             // Update trip record
+            console.log("Going to update trip record", trip.tripName);
             await updateTripRecord(trip, updates);
         }
 
@@ -924,15 +955,124 @@ async function mainLoop() {
     }
 }
 
+async function tripStatusChecker(trip) {
+    try {
+        const { deviceImei, tripStage, activeStatus, route, plannedStartTime, currentSignificantLocation, movementStatus, } = trip;
+        // Handle Planned trips
+        if (tripStage === 'Planned') {
+            if (currentSignificantLocation?.locationName === route.startLocation.locationName) {
+                // Add deviceImei to redis set of active trip IMEIs
+                await redis.sadd('activeTripImeis', deviceImei);
+                return { tripStage: 'Active', activeStatus: 'Reached Start Location' };
+            }
+            const currentTime = new Date();
+            return {
+                tripStage: currentTime > new Date(plannedStartTime) ? 'Start Delayed' : tripStage,
+                activeStatus: 'Inactive'
+            };
+        }
+
+        // Handle Start Delayed trips
+        if (tripStage === 'Start Delayed') {
+            if (currentSignificantLocation?.locationName === route.startLocation.locationName) {
+                await redis.sadd('activeTripImeis', deviceImei);
+                return { tripStage: 'Active', activeStatus: 'Reached Start Location' };
+            }
+            const currentTime = new Date();
+            return {
+                tripStage: currentTime > new Date(plannedStartTime) ? 'Start Delayed' : 'Planned',
+                activeStatus: 'Inactive'
+            };
+        }
+
+        // Handle Active trips
+        if (tripStage === 'Active') {
+            // Check if truck is at end location and has left
+            if (activeStatus.includes('end location') && !currentSignificantLocation?.locationName === route.endLocation.locationName) {
+                return { tripStage: 'Completed', activeStatus: 'Completed' };
+            }
+
+            // Get current location type and name
+            const locationType = currentSignificantLocation?.locationType;
+            const locationName = currentSignificantLocation?.locationName;
+
+            // Calculate dwell time if truck is in a significant location
+            const dwellTime = currentSignificantLocation ?
+                moment().diff(moment(currentSignificantLocation.entryTime), 'minutes') : 0;
+            const maxDetentionTime = route.maxDetentionTime || 120; // default 2 hours
+
+            // Handle different active statuses
+            switch (activeStatus) {
+                case 'Reached Start Location':
+                case 'Detained At Start Location':
+                    if (locationName === route.startLocation.locationName) {
+                        return dwellTime > maxDetentionTime ?
+                            { tripStage, activeStatus: 'Detained At Start Location' } :
+                            { tripStage, activeStatus: 'Reached Start Location' };
+                    }
+                    return getMovementBasedStatus(tripStage, movementStatus);
+
+                case 'Running On Route':
+                case 'Route Violated':
+                case 'Halted':
+                    if (locationType === 'viaLocation') {
+                        return { tripStage, activeStatus: `Reached Via Location (${locationName})` };
+                    }
+                    if (locationType === 'endLocation') {
+                        return { tripStage, activeStatus: 'Reached End Location' };
+                    }
+                    return getMovementBasedStatus(tripStage, movementStatus);
+
+                case (activeStatus.match(/^Reached Via Location/)?.input):
+                case (activeStatus.match(/^Detained At Via Location/)?.input):
+                    if (locationName === currentSignificantLocation?.locationName) {
+                        return dwellTime > maxDetentionTime ?
+                            { tripStage, activeStatus: `Detained At Via Location (${locationName})` } :
+                            { tripStage, activeStatus: `Reached Via Location (${locationName})` };
+                    }
+                    if (locationType === 'viaLocation') {
+                        return { tripStage, activeStatus: `Reached Via Location (${locationName})` };
+                    }
+                    return getMovementBasedStatus(tripStage, movementStatus);
+
+                case 'Reached End Location':
+                case 'Detained At End Location':
+                    if (locationName === route.endLocation.locationName) {
+                        return dwellTime > maxDetentionTime ?
+                            { tripStage, activeStatus: 'Detained At End Location' } :
+                            { tripStage, activeStatus: 'Reached End Location' };
+                    } else {
+                        // Remove deviceIMEI from activeTrips set in Redis
+                        await redis.srem('activeTripImeis', trip.deviceImei);
+                        return { tripStage: 'Completed', activeStatus: 'Completed' };
+                    }
+
+                default:
+                    return getMovementBasedStatus(tripStage, movementStatus);
+            }
+        }
+
+        return { tripStage, activeStatus };
+
+    } catch (error) {
+        console.error('Error in tripStatusChecker:', error);
+        return { tripStage, activeStatus };
+    }
+}
+
+// Helper function to determine status based on movement
+function getMovementBasedStatus(tripStage, movementStatus) {
+    if (movementStatus === 'Halted') {
+        return { tripStage, activeStatus: 'Halted' };
+    }
+    if (movementStatus === 'Driving') {
+        // Note: routeViolationStatus should be checked here
+        // For now, assuming route is not violated
+        return { tripStage, activeStatus: 'Running On Route' };
+    }
+    return { tripStage, activeStatus: 'Running On Route' };
+}
+
 // Start the application
 main();
 
-module.exports = {
-    getTripPath,
-    presenceInSignificantLocation,
-    getRouteSituation,
-    checkRules,
-    tripStatusChecker,
-    sendAlerts,
-    updateTripRecord
-};

@@ -35,7 +35,7 @@ const tripSchema = new Schema({
         maxHaltTime: { type: Number },
         routeViolationThreshold: { type: Number },
         minGeneratorHours: { type: Number },
-        minGeneratorHoursPercentage: { type: Number},
+        minGeneratorHoursPercentage: { type: Number },
         minGeneratorDistance: { type: Number },
         minGeneratorDistancePercentage: { type: Number },
         minTemperature: { type: Number },
@@ -212,7 +212,7 @@ const tripSchema = new Schema({
     movementStatus: {
         type: String,
         enum: ['Driving', 'Halted', 'Unknown'],
-        default: 'Halted',
+        default: 'Unknown',
     },
 
     distanceCovered: { type: Number, default: 0 }, // kilometers

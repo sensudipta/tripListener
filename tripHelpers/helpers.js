@@ -39,9 +39,6 @@ function isPointInPolygon(point, polygon) {
 
         if (intersect) inside = !inside;
     }
-    if (inside) {
-        console.log("#### Point In Polygon", point.lng, point.lat, polygon.length);
-    }
     return inside;
 }
 
@@ -74,15 +71,30 @@ function calculatePathDistance(pathPoints) {
     return distance;
 }
 
-function checkLocation(location, truckPoint) {
-    //console.log("#### In checkLocation");
-    //console.log("#### Location", location.locationType, "zone size", location?.zoneCoordinates);
-    //console.log("#### TruckPoint", truckPoint.dt_tracker);
+function checkLocation(location, truckPoint, fallBackTriggerRadius = 100) {
     try {
         if (location.locationType === 'zone') {
-            // For zone type, check if point is inside polygon
-            const inside = isPointInPolygon(truckPoint, location.zoneCoordinates);
-            inside && console.log("#### ST09a TruckPoint In Zone", location.locationName, location.locationType, inside);
+            // First check if point is inside polygon
+            let inside = isPointInPolygon(truckPoint, location.zoneCoordinates);
+
+            // If not inside, check distance to all vertices
+            if (!inside) {
+                for (const vertex of location.zoneCoordinates) {
+                    const vertexPoint = {
+                        latitude: parseFloat(vertex[1]),
+                        longitude: parseFloat(vertex[0])
+                    };
+                    const distance = getLengthBetweenPoints(
+                        { latitude: parseFloat(truckPoint.lat), longitude: parseFloat(truckPoint.lng) },
+                        vertexPoint
+                    );
+                    if (distance <= fallBackTriggerRadius) {
+                        inside = true;
+                        break;
+                    }
+                }
+            }
+
             return inside;
         } else if (location.locationType === 'point') {
             // For point type, check if within trigger radius

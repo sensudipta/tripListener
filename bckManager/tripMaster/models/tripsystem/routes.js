@@ -42,11 +42,6 @@ const routeSchema = new Schema({
         zoneCoordinates: { type: [[Number]] },
         triggerRadius: { type: Number },
         maxDetentionTime: { type: Number },
-        purpose: {
-            type: String,
-            enum: ['Loading', 'Unloading', 'LoadingUnloading', 'Fueling', 'Resting', 'Checkpost', 'Other'],
-            required: true
-        }
     },
     endLocation: {
         location: {
@@ -73,11 +68,6 @@ const routeSchema = new Schema({
         zoneCoordinates: { type: [[Number]] },
         triggerRadius: { type: Number },
         maxDetentionTime: { type: Number },
-        purpose: {
-            type: String,
-            enum: ['Loading', 'Unloading', 'LoadingUnloading', 'Fueling', 'Resting', 'Checkpost', 'Other'],
-            required: true
-        }
     },
 
     viaLocations: [{
@@ -105,11 +95,6 @@ const routeSchema = new Schema({
         zoneCoordinates: { type: [[Number]] },
         triggerRadius: { type: Number },
         maxDetentionTime: { type: Number },
-        purpose: {
-            type: String,
-            enum: ['Loading', 'Unloading', 'LoadingUnloading', 'Fueling', 'Resting', 'Checkpost', 'Other'],
-            required: true
-        }
     }],
     routePath: {
         type: {
@@ -166,12 +151,6 @@ const routeSchema = new Schema({
                 enum: ['tripStage', 'activeStatus', 'ruleViolation', 'finalReport']
             }]
         }],
-        telegram: [{
-            name: { type: String }, number: { type: String }, categories: [{
-                type: String,
-                enum: ['tripStage', 'activeStatus', 'ruleViolation', 'finalReport']
-            }]
-        }],
         email: [{
             name: { type: String }, email: { type: String }, categories: [{
                 type: String,
@@ -185,25 +164,7 @@ const routeSchema = new Schema({
             }]
         }],
     },
-    trips: [{ type: ObjectId, ref: 'Trip' }],
-    archivedRoutes: [{
-        routePath: {
-            type: {
-                type: String,
-                enum: ['LineString'],
-                required: true
-            },
-            coordinates: {
-                type: [[Number]],
-                required: true
-            }
-        },
-        routeLength: { type: Number, required: true },
-        routeDuration: { type: Number, required: true },
-        routeName: { type: String, required: true },
-        archivedAt: { type: Date, default: Date.now },
-        version: { type: String, required: true }
-    }]
+    trips: [{ type: ObjectId, ref: 'Trip' }]
 }, {
     timestamps: true,
     versionKey: '__v'  // Add this line
