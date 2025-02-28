@@ -4,8 +4,7 @@ const { tripLogger } = require('./logger');
 async function checkRules(
     rules, ruleStatus, truckPoint, currentHaltDuration,
     movementStatus, averageSpeed,
-    distanceFromTruck, travelDirection, reverseTravelDistance,
-
+    distanceFromTruck, travelDirection, reverseTravelDistance
 ) {
 
     const updatedRuleStatus = {};

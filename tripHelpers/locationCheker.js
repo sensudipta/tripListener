@@ -3,100 +3,131 @@ const { tripLogger } = require('./logger');
 
 async function locationChecker(trip, truckPoint) {
     try {
-        const { route } = trip;
-        const { startLocation, endLocation, viaLocations } = route;
-        let { currentSignificantLocation } = trip;
+        // Ensure we have valid input
+        if (!trip || !trip.route || !truckPoint) {
+            console.error('Invalid input to locationChecker');
+            return { locationChanged: false };
+        }
 
-        let previousSignificantLocation = null;
-        let newSignificantLocation = null;
-        let locationChange = {
-            entry: null,
-            exit: null,
-            viaSwitch: null
-        };
+        // Extract locations from route
+        const { startLocation, endLocation, viaLocations = [] } = trip.route;
 
-        // Check if truck is within any significant location
-        if (checkLocation(startLocation, truckPoint)) {
-            newSignificantLocation = { ...startLocation, locationType: 'startLocation' };
-        } else if (checkLocation(endLocation, truckPoint)) {
-            newSignificantLocation = { ...endLocation, locationType: 'endLocation' };
-        } else {
-            for (const viaLocation of viaLocations) {
-                if (checkLocation(viaLocation, truckPoint)) {
-                    newSignificantLocation = { ...viaLocation, locationType: 'viaLocation' };
-                    break;
+        // Debug location checking
+        console.log(`Checking location for point [${truckPoint.lat}, ${truckPoint.lng}]`);
+        console.log(`Start location: ${startLocation?.locationName}`);
+        console.log(`Via locations: ${viaLocations.map(loc => loc.locationName).join(', ')}`);
+        console.log(`End location: ${endLocation?.locationName}`);
+
+        // Combine all significant locations
+        const allLocations = [];
+
+        if (startLocation) {
+            allLocations.push({
+                ...startLocation,
+                locationType: 'startLocation'
+            });
+        }
+
+        if (endLocation && endLocation.locationId !== startLocation?.locationId) {
+            allLocations.push({
+                ...endLocation,
+                locationType: 'endLocation'
+            });
+        }
+
+        viaLocations.forEach(loc => {
+            allLocations.push({
+                ...loc,
+                locationType: 'viaLocation'
+            });
+        });
+
+        console.log(`Total significant locations to check: ${allLocations.length}`);
+
+        // Check if truck is in any location
+        let currentLocation = null;
+        let locationChanged = false;
+        let exitedLocation = null;
+        let dwellTime = 0;
+
+        for (const location of allLocations) {
+            // Skip locations without coordinates
+            if (!location.location || !location.location.coordinates) {
+                console.warn(`Location ${location.locationName} has no coordinates`);
+                continue;
+            }
+
+            // Check if truck is in this location
+            const inLocation = checkLocation(location, truckPoint);
+
+            if (inLocation) {
+                console.log(`Truck is in location: ${location.locationName}`);
+                currentLocation = location;
+                break;
+            }
+        }
+
+        // Check if location has changed
+        if (trip.currentSignificantLocation?.locationId !== currentLocation?.locationId) {
+            locationChanged = true;
+
+            // If we left a location, record it
+            if (trip.currentSignificantLocation && !currentLocation) {
+                exitedLocation = trip.currentSignificantLocation;
+
+                // Calculate dwell time if we have entry time
+                const entryTime = trip.currentSignificantLocation.entryTime;
+                if (entryTime) {
+                    dwellTime = new Date(truckPoint.dt_tracker) - new Date(entryTime);
                 }
             }
         }
 
-        // Handle significant location changes
-        if (newSignificantLocation) {
-            if (!currentSignificantLocation) {
-                // First entry into a significant location
-                currentSignificantLocation = {
-                    ...newSignificantLocation,
-                    entryTime: truckPoint.dt_tracker
-                };
-                tripLogger(trip, `#FN:LOCCHK -> ENTRY ${currentSignificantLocation.locationName} (${currentSignificantLocation.locationType})`);
-            } else if (newSignificantLocation.locationName !== currentSignificantLocation.locationName) {
-                // Truck has moved to a different significant location
-                previousSignificantLocation = {
-                    ...currentSignificantLocation,
-                    exitTime: truckPoint.dt_tracker
-                };
-                currentSignificantLocation = {
-                    ...newSignificantLocation,
-                    entryTime: truckPoint.dt_tracker
-                };
-                tripLogger(trip, `#FN:LOCCHK -> JUMPED  OldLoc: ${previousSignificantLocation.locationName} (${previousSignificantLocation.locationType}) -> NewLoc: ${currentSignificantLocation.locationName} (${currentSignificantLocation.locationType})`);
+        // Initialize or update significantLocations array
+        let significantLocations = trip.significantLocations || [];
+
+        if (locationChanged) {
+            // If we entered a new location, add it to the array
+            if (currentLocation) {
+                const existingLocationIndex = significantLocations.findIndex(
+                    loc => loc.locationId === currentLocation.locationId && !loc.exitTime
+                );
+
+                if (existingLocationIndex === -1) {
+                    // Add new location entry
+                    significantLocations.push({
+                        ...currentLocation,
+                        entryTime: new Date(truckPoint.dt_tracker),
+                        exitTime: null
+                    });
+
+                    console.log(`Added ${currentLocation.locationName} to significant locations`);
+                }
             }
-            // If in same location, do nothing
-        } else if (currentSignificantLocation) {
-            // Truck has left the significant location
-            previousSignificantLocation = {
-                ...currentSignificantLocation,
-                exitTime: truckPoint.dt_tracker
-            };
-            currentSignificantLocation = null;
-            tripLogger(trip, `#FN:LOCCHK -> EXIT from ${previousSignificantLocation.locationName} (${previousSignificantLocation.locationType})`);
-        }
 
+            // If we exited a location, update its exit time
+            if (exitedLocation) {
+                const exitedLocationIndex = significantLocations.findIndex(
+                    loc => loc.locationId === exitedLocation.locationId && !loc.exitTime
+                );
 
-
-        // Handle exit cases
-        if (previousSignificantLocation) {
-            if (previousSignificantLocation.locationType === 'startLocation') {
-                locationChange.exit = 'startLocation';
-            } else if (previousSignificantLocation.locationType === 'endLocation') {
-                locationChange.exit = 'endLocation';
-            } else if (previousSignificantLocation.locationType === 'viaLocation') {
-                locationChange.exit = `viaLocation ${previousSignificantLocation.locationName}`;
+                if (exitedLocationIndex !== -1) {
+                    significantLocations[exitedLocationIndex].exitTime = new Date(truckPoint.dt_tracker);
+                    console.log(`Updated exit time for ${exitedLocation.locationName}`);
+                }
             }
         }
 
-        // Handle entry cases 
-        if (currentSignificantLocation) {
-            if (currentSignificantLocation.locationType === 'startLocation') {
-                locationChange.entry = 'startLocation';
-            } else if (currentSignificantLocation.locationType === 'endLocation') {
-                locationChange.entry = 'endLocation';
-            } else if (currentSignificantLocation.locationType === 'viaLocation') {
-                locationChange.entry = `viaLocation ${currentSignificantLocation.locationName}`;
-            }
-        }
-
-        // Check for via location switch
-        if (previousSignificantLocation?.locationType === 'viaLocation' &&
-            currentSignificantLocation?.locationType === 'viaLocation' &&
-            previousSignificantLocation.locationName !== currentSignificantLocation.locationName) {
-            locationChange.viaSwitch = `${previousSignificantLocation.locationName} to ${currentSignificantLocation.locationName}`;
-        }
-        // If no locations, no change strings needed
-        return { currentSignificantLocation, previousSignificantLocation, locationChange };
-    } catch (err) {
-        console.error('Error in locationChecker:', err);
-        tripLogger(trip, 'Error in presenceInSignificantLocation:', err);
-        return { currentSignificantLocation: null, previousSignificantLocation: null, locationChange: null };
+        return {
+            locationChanged,
+            currentSignificantLocation: currentLocation,
+            exitedLocation,
+            dwellTime,
+            significantLocations
+        };
+    } catch (error) {
+        console.error('Error in locationChecker:', error);
+        return { locationChanged: false };
     }
 }
 

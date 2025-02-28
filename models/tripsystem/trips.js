@@ -146,6 +146,10 @@ const tripSchema = new Schema({
         exitTime: { type: Date },
         dwellTime: { type: Number },
     },
+    currentRouteSegment: {
+        type: String,
+        default: null
+    },
 
     significantLocations: [{
         location: {

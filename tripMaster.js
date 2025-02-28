@@ -14,6 +14,7 @@ const checkRules = require('./tripHelpers/checkRules');
 const updateTripRecord = require('./tripHelpers/dbUpdater');
 
 const { formatToIST, consoleDate, shortDate } = require('./tripHelpers/dateFormatter');
+const { parseRouteType } = require('./tripHelpers/helpers');
 
 
 // default 10 hours
@@ -67,7 +68,12 @@ async function mainLoop() {
             process.exit(0);
         }
 
-        //console.log('Trip data:', JSON.stringify(trip.route, null, 2));
+        // Determine route type and add to trip object
+        if (trip.route && trip.route.routeName) {
+            trip.routeType = parseRouteType(trip.route.routeName);
+            tripLogger(trip, `@MAIN: Route type determined: ${trip.routeType.type}, Via points: ${trip.routeType.viaPointCount}`);
+        }
+
         validateTripData(trip);
         processLogger(`Processing trip: ${trip.truckRegistrationNumber} ${trip.tripName} (${trip.tripStage})`);
         tripLogger(trip, `@MAIN: Trip Check Started ${trip.truckRegistrationNumber}`);
@@ -244,16 +250,23 @@ async function mainLoop() {
                 travelDirection,
                 reverseTravelDistance,
                 nearestRoutePoint,
-                nearestPointIndex
+                nearestPointIndex,
+                routeSegment,
+                routeType
             } = routeSituation;
             tripLogger(trip, `@MAIN: RouteSituation: truckDist: ${distanceFromTruck.toFixed(1)} cumDist: ${cumulativeDistance.toFixed(1)} npIdx: ${nearestPointIndex}`);
             tripLogger(trip, `@MAIN: RouteSituation: travelDir: ${travelDirection} reverseTravel: ${reverseTravelDistance?.toFixed(1)}`);
+            tripLogger(trip, `@MAIN: RouteSituation: routeType: ${routeType.type} routeSegment: ${routeSegment}`);
+
+            // Store route situation in trip object for other helpers to use
+            trip.routeSituation = routeSituation;
 
             updates.distanceFromTruck = distanceFromTruck;
             updates.travelDirection = travelDirection;
             updates.reverseTravelDistance = reverseTravelDistance;
             updates.nearestRoutePoint = nearestRoutePoint;
             updates.nearestPointIndex = nearestPointIndex;
+            updates.currentRouteSegment = routeSegment; // Store current route segment in database
 
             updates.distanceCovered = cumulativeDistance;
             updates.distanceRemaining = trip.route.routeLength / 1000 - cumulativeDistance;

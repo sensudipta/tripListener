@@ -5,6 +5,11 @@ const { logDate, monthlyLogFileDate, consoleDate } = require('./dateFormatter');
 
 function tripLogger(trip, message) {
     try {
+        // Ensure trip is defined
+        if (!trip) {
+            console.log(`[TRIP_LOGGER] ${message} (trip undefined)`);
+            return;
+        }
         const { truckRegistrationNumber, tripId } = trip;
         const filename = `${tripId}.log`;
         const logFilePath = path.join(__dirname, '..', 'logs', 'tripLogs', filename);
