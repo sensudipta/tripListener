@@ -25,9 +25,9 @@ const tripSchema = new Schema({
 
     //planned start time
     plannedStartTime: { type: Date, required: true },
+    backDated: { type: Boolean, required: true, default: false },
 
     //trip constraints
-
     rules: {
         drivingStartTime: { type: String },
         drivingEndTime: { type: String },
@@ -79,6 +79,12 @@ const tripSchema = new Schema({
                 enum: ['tripStage', 'activeStatus', 'ruleViolation', 'finalReport']
             }]
         }],
+        telegram: [{
+            name: { type: String }, number: { type: String }, categories: [{
+                type: String,
+                enum: ['tripStage', 'activeStatus', 'ruleViolation', 'finalReport']
+            }]
+        }],
         email: [{
             name: { type: String }, email: { type: String }, categories: [{
                 type: String,
@@ -92,6 +98,8 @@ const tripSchema = new Schema({
             }]
         }],
     },
+
+
     // Trip Progress & Status
     lastCheckTime: { type: Date },
 
@@ -167,6 +175,75 @@ const tripSchema = new Schema({
         dwellTime: { type: Number },
     }],
 
+    // Add this field to the schema
+    hasExitedEndLocation: { type: Boolean, default: false },
+
+    // Segment tracking fields
+    currentlyActiveSegmentIndex: { type: Number, default: -1 }, // -1 means no active segment yet
+    currentlyActiveSegment: {
+        segmentIndex: { type: Number },
+        name: { type: String },
+        direction: { type: String, enum: ['up', 'down', 'oneway'] },
+        loadType: { type: String, enum: ['loaded', 'empty', 'none'] },
+        startTime: { type: Date },
+        status: {
+            type: String,
+            enum: ['not_started', 'running', 'completed'],
+            default: 'not_started'
+        },
+        distanceCovered: { type: Number, default: 0 },
+        distanceRemaining: { type: Number, default: 0 },
+        completionPercentage: { type: Number, default: 0 },
+        estimatedTimeOfArrival: { type: Date },
+        nearestPointIndex: { type: Number, default: 0 },
+        startLocation: {
+            locationName: { type: String },
+            arrivalTime: { type: Date },
+            departureTime: { type: Date },
+            dwellTime: { type: Number },
+        },
+        endLocation: {
+            locationName: { type: String },
+            arrivalTime: { type: Date },
+            departureTime: { type: Date },
+            dwellTime: { type: Number },
+        },
+    },
+
+    segmentHistory: [{
+        segmentIndex: { type: Number, required: true },
+        name: { type: String, required: true },
+        direction: { type: String, enum: ['up', 'down', 'oneway'], required: true },
+        loadType: { type: String, enum: ['loaded', 'empty', 'none'], required: true },
+        startTime: { type: Date },
+        endTime: { type: Date },
+        status: {
+            type: String,
+            enum: ['not_started', 'running', 'completed'],
+            default: 'not_started',
+            required: true
+        },
+        distanceCovered: { type: Number, default: 0 },
+        distanceRemaining: { type: Number, default: 0 },
+        completionPercentage: { type: Number, default: 0 },
+        estimatedTimeOfArrival: { type: Date },
+        nearestPointIndex: { type: Number, default: 0 },
+        startLocation: {
+            locationName: { type: String },
+            arrivalTime: { type: Date },
+            departureTime: { type: Date },
+            dwellTime: { type: Number },
+            tripPathIndex: { type: Number },
+        },
+        endLocation: {
+            locationName: { type: String },
+            arrivalTime: { type: Date },
+            departureTime: { type: Date },
+            dwellTime: { type: Number },
+            tripPathIndex: { type: Number },
+        },
+    }],
+
     significantEvents: [{
         eventType: {
             type: String,
@@ -186,13 +263,8 @@ const tripSchema = new Schema({
                 type: [Number], // [longitude, latitude]
             }
         },
-        eventPath: {
-            type: {
-                type: String,
-                enum: ['LineString'],
-            },
-            coordinates: { type: [[Number]] },
-        },
+        eventStartTripPathIndex: { type: Number },
+        eventEndTripPathIndex: { type: Number },
     }],
 
     tripPath: [{
@@ -201,12 +273,13 @@ const tripSchema = new Schema({
             enum: ['Point'],
         },
         coordinates: { type: [Number] },
-        dtTracker: { type: Date },
+        dt_tracker: { type: Date },
         gpsRecord: {
             speed: { type: Number },
             heading: { type: Number },
             acc: { type: Number },
-        }
+        },
+        fuelLevel: { type: Number },
     }],
 
     movementStatus: {
@@ -290,6 +363,7 @@ const tripSchema = new Schema({
             sentTime: { type: Date },
         }
     ],
+    tripDataFile: { type: String },
 }, {
     timestamps: true,
     versionKey: '__v'  // Add this line
