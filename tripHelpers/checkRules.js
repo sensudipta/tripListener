@@ -1,5 +1,5 @@
 const moment = require('moment');
-const { tripLogger } = require('../common/helpers/logger');
+const { tripLogger, processLogger } = require('../common/helpers/logger');
 const alertSender = require('./alertSender');
 const { calculatePathDistance } = require('../common/helpers/helper');
 
@@ -64,7 +64,11 @@ function processRules(trip) {
 
     } catch (err) {
         console.error('Error in processRules:', err);
-        tripLogger(trip, '#FN:Rules: Error processing rules:', err);
+        if (trip) {
+            tripLogger(trip, `#FN:Rules: Error processing rules: ${JSON.stringify(err)}`);
+        } else {
+            processLogger(`#FN:Rules: Error processing rules: ${JSON.stringify(err)}`);
+        }
         return false;
     }
 }

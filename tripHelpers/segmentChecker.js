@@ -1,4 +1,4 @@
-const { tripLogger } = require('../common/helpers/logger');
+const { tripLogger, processLogger } = require('../common/helpers/logger');
 const routeChecker = require('./routeChecker');
 
 /**
@@ -65,7 +65,11 @@ function processSegment(trip) {
         return true;
     } catch (err) {
         console.error('Error in processSegment:', err);
-        tripLogger(trip, '#FN:SEGCHK: Error processing segment:', err);
+        if (trip) {
+            tripLogger(trip, `#FN:SEGCHK: Error processing segment: ${JSON.stringify(err)}`);
+        } else {
+            processLogger(`#FN:SEGCHK: Error processing segment: ${JSON.stringify(err)}`);
+        }
         return false;
     }
 }

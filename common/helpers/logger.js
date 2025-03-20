@@ -6,11 +6,11 @@ const { logDate, monthlyLogFileDate, consoleDate } = require('./dateFormatter');
 function tripLogger(trip, message) {
     try {
         // First, log to console for debugging
-        console.log(`TRIP LOG [${trip?.tripId || 'unknown'}]: ${message}`);
+        console.log(consoleDate(moment()), `#TT: [${trip?.truckRegistrationNumber || 'unknown'}]: ${message}`);
 
         // Check if trip object is valid
         if (!trip || !trip.tripId) {
-            console.error('Invalid trip object passed to tripLogger');
+            console.error('Invalid trip object passed to tripLogger', message);
             return false;
         }
 
@@ -56,7 +56,7 @@ function tripLogger(trip, message) {
 
         return true;
     } catch (error) {
-        console.error('Error in tripLogger:', error);
+        console.error('Error in tripLogger:', error, message);
         return false;
     }
 }
@@ -67,11 +67,11 @@ function processLogger(message) {
         const filename = `processLog_${date}.csv`;
         const logFilePath = path.join(__dirname, '../../', 'logs', 'processLogs', filename);
         const logMessage = `${logDate(moment())}, #,${message}\n`;
-        console.log(consoleDate(moment()), "#ProcessLogger: ", message);
+        console.log(consoleDate(moment()), "#PP:", message);
         fs.appendFileSync(logFilePath, logMessage);
         return true;
     } catch (error) {
-        console.error('Error in processLogger:', error);
+        console.error('Error in processLogger:', error, message);
         return false;
     }
 }

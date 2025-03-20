@@ -1,7 +1,7 @@
 const moment = require('moment');
 const { redisClient } = require('../common/liveDB');
-const { tripLogger } = require('../common/helpers/logger');
-
+const { tripLogger, processLogger } = require('../common/helpers/logger');
+const alertSender = require('./alertSender');
 const globalMaxDetentionTime = 600; // default 10 hours
 
 /**
@@ -39,8 +39,15 @@ async function processStatus(trip) {
         }
 
         // Calculate location-based statuses
-        const dwellTime = currentSignificantLocation?.entryTime ?
-            moment(trip.tripPath[trip.pathPoints.toIndex].dt_tracker).diff(moment(currentSignificantLocation.entryTime), 'minutes') : 0;
+        let dwellTime = 0;
+        if (currentSignificantLocation?.entryTime &&
+            trip?.pathPoints?.toIndex !== undefined &&
+            trip?.tripPath &&
+            trip?.tripPath[trip?.pathPoints?.toIndex]?.dt_tracker) {
+
+            dwellTime = moment(trip.tripPath[trip.pathPoints.toIndex].dt_tracker)
+                .diff(moment(currentSignificantLocation.entryTime), 'minutes');
+        }
 
         const locStatus = getLocationBasedStatus(
             currentSignificantLocation?.locationType,
@@ -147,10 +154,44 @@ async function processStatus(trip) {
 
         if (newTripStage !== trip.tripStage) {
             tripLogger(trip, `#FN:StatusChecker: Trip Stage Changed: ${trip.tripStage} -> ${newTripStage}`);
+
+            // Add a significant event for trip stage change
+            createSignificantEvent(trip, 'tripStageChange', {
+                fromStage: trip.tripStage,
+                toStage: newTripStage
+            });
         }
+
         if (newActiveStatus !== trip.activeStatus) {
             tripLogger(trip, `#FN:StatusChecker: Active Status Changed: ${trip.activeStatus} -> ${newActiveStatus}`);
+
+            // Add a significant event for active status change
+            createSignificantEvent(trip, 'activeStatusChange', {
+                fromStatus: trip.activeStatus,
+                toStatus: newActiveStatus
+            });
+
+            // Send alert for active status change
+            const alertEvent = {
+                eventType: 'Status Update',
+                eventText: `Status changed from ${trip.activeStatus || 'Undefined'} to ${newActiveStatus}`,
+                eventTime: trip.tripPath && trip.pathPoints ?
+                    trip.tripPath[trip.pathPoints.toIndex].dt_tracker :
+                    new Date()
+            };
+
+            // Using setTimeout to make this non-blocking
+            setTimeout(async () => {
+                try {
+                    const alertSender = require('./alertSender');
+                    await alertSender(trip, alertEvent, 'activeStatus');
+                    tripLogger(trip, `#FN:StatusChecker: Sent alert for status change to ${newActiveStatus}`);
+                } catch (error) {
+                    tripLogger(trip, `#FN:StatusChecker: Error sending alert for status change: ${error.message}`);
+                }
+            }, 0);
         }
+
         // Update trip object directly
         trip.tripStage = newTripStage;
         trip.activeStatus = newActiveStatus;
@@ -159,9 +200,46 @@ async function processStatus(trip) {
 
     } catch (error) {
         console.error('Error in processStatus:', error);
-        tripLogger(trip, `#FN:StatusChecker: Error in processStatus: ${error}`);
+        if (trip) {
+            tripLogger(trip, `#FN:StatusChecker: Error in processStatus: ${error}`);
+        } else {
+            processLogger(`#FN:StatusChecker: Error in processStatus: ${error}`);
+        }
         return false;
     }
+}
+
+/**
+ * Create a significant event for the trip
+ * @param {Object} trip - Trip object to update
+ * @param {string} eventType - Type of event
+ * @param {Object} details - Event details
+ */
+function createSignificantEvent(trip, eventType, details) {
+    if (!trip.significantEvents) {
+        trip.significantEvents = [];
+    }
+
+    // Get current location and timestamp
+    const currentPoint = trip.tripPath && trip.pathPoints ?
+        trip.tripPath[trip.pathPoints.toIndex] : null;
+
+    const newEvent = {
+        eventType: 'activestatuschange',
+        eventName: eventType === 'activeStatusChange' ?
+            `Status changed to ${details.toStatus}` :
+            `Trip stage changed to ${details.toStage}`,
+        eventTime: currentPoint ? new Date(currentPoint.dt_tracker) : new Date(),
+        eventLocation: currentPoint ? {
+            type: 'Point',
+            coordinates: currentPoint.coordinates
+        } : undefined,
+        eventDetails: details,
+        eventTripPathIndex: trip.pathPoints?.toIndex
+    };
+
+    trip.significantEvents.push(newEvent);
+    tripLogger(trip, `#FN:StatusChecker: Created new ${eventType} event: ${newEvent.eventName}`);
 }
 
 // Helper functions remain the same but with updated parameter structure

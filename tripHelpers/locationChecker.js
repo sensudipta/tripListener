@@ -1,5 +1,5 @@
 const { checkLocation } = require('../common/helpers/helper');
-const { tripLogger } = require('../common/helpers/logger');
+const { tripLogger, processLogger } = require('../common/helpers/logger');
 
 /**
  * Check and update significant location status for the trip
@@ -204,7 +204,11 @@ function processLocation(trip) {
 
     } catch (err) {
         console.error('Error in processLocation:', err);
-        tripLogger(trip, '#FN:LOCCHK: Error processing location:', err);
+        if (trip) {
+            tripLogger(trip, `#FN:LOCCHK: Error processing location: ${JSON.stringify(err)}`);
+        } else {
+            processLogger(`#FN:LOCCHK: Error processing location: ${JSON.stringify(err)}`);
+        }
         return false;
     }
 }

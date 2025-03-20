@@ -9,11 +9,9 @@ async function getFuel({ timeFrom, timeTo, imei, user_id }) {
         const distanceResp = await axios.post('http://172.31.18.33:11001/accurateKm', reqBody);
         const distance = distanceResp.data.dist;
         const levels = levelResp.data.data;
-
         // Get events using spec API (removed crawl option as it's not needed)
         const specResp = await axios.post('http://172.31.18.33:11002/crawlFuel', reqBody);
         const events = specResp.data.data;
-
         return processConsumptionData(levels, events, distance);
     } catch (error) {
         console.error('Error in getFuel:', error);
@@ -25,6 +23,9 @@ async function getFuel({ timeFrom, timeTo, imei, user_id }) {
 function processConsumptionData(levels, events, distance) {
     const tank = 'tank_1';
     let tanklist = { ...levels };
+    if (!tanklist[tank]) {
+        return null;
+    }
 
     // Process events
     events.forEach(event => {

@@ -1,4 +1,4 @@
-const { tripLogger } = require('../common/helpers/logger');
+const { tripLogger, processLogger } = require('../common/helpers/logger');
 const { whatsApp, redisClient } = require('../common/liveDB');
 const { tripDateView } = require('../common/helpers/dateFormatter');
 const { SESClient } = require("@aws-sdk/client-ses");
@@ -22,6 +22,11 @@ const ADMIN_EMAILS = ['sudipta@roadmatics.com', 'tandrima.mukherjee@roadmatics.c
  */
 async function processAlerts(trip, event, category = 'activeStatus') {
     try {
+
+        if (!trip) {
+            processLogger(`#FN:Alerts: Failed Processing alerts for invalid trip`);
+            return false;
+        }
         // Validate required event properties
         if (!event || !event.eventType || !event.eventText || !event.eventTime) {
             tripLogger(trip, '#FN:Alerts: Missing required event properties');
@@ -200,7 +205,11 @@ async function processAlerts(trip, event, category = 'activeStatus') {
 
     } catch (err) {
         console.error('Error in processAlerts:', err);
-        tripLogger(trip, `#FN:Alerts: Failed to send alerts: ${err}`);
+        if (trip) {
+            tripLogger(trip, `#FN:Alerts: Failed to send alerts: ${err}`);
+        } else {
+            processLogger(`#FN:Alerts: Failed to send alerts: ${err}`);
+        }
         return false;
     }
 }

@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const { spawn } = require('child_process');
 const os = require('os');
 const { Trip } = require('./models');
-const { tripLogger, processLogger } = require('./common/helpers/logger');
+const { processLogger } = require('./common/helpers/logger');
 const { TRIPDB, redisClient } = require('./common/liveDB');
 
 class TripRunner {
@@ -190,14 +190,15 @@ class TripRunner {
     async launchTripProcessor(trip) {
         try {
             const tripId = trip._id.toString();
+            const tripIdLabel = `[${trip.truckRegistrationNumber}][${trip.tripId}]`;
 
             // Skip if already processing this trip
             if (this.activeProcesses.has(tripId)) {
-                processLogger(`Trip ${tripId} already being processed, skipping`);
+                processLogger(`${tripIdLabel} already being processed, skipping`);
                 return false;
             }
 
-            processLogger(`Launching processor for trip ${tripId}`);
+            processLogger(`Launching processor for ${tripIdLabel}`);
 
             // Create new process for trip
             const childProcess = spawn('node', ['liveTripMaster.js'], {
@@ -214,7 +215,7 @@ class TripRunner {
                     const processInfo = this.activeProcesses.get(tripId);
                     if (processInfo && processInfo.process && !processInfo.process.killed) {
                         processInfo.process.kill();
-                        processLogger(`Process timeout for trip ${tripId}`);
+                        processLogger(`Process timeout for ${tripIdLabel}`);
                     }
                     this.activeProcesses.delete(tripId);
 
@@ -227,27 +228,27 @@ class TripRunner {
             childProcess.stdout.on('data', (data) => {
                 const output = data.toString().trim();
                 if (output) {
-                    processLogger(`Trip ${tripId} output: ${output}`);
+                    //processLogger(`[${tripIdLabel}]:   ${output}`);
+                    //console.log(output);
                 }
             });
 
             childProcess.stderr.on('data', (data) => {
                 const error = data.toString().trim();
                 if (error) {
-                    processLogger(`Trip ${tripId} error: ${error}`);
-                    console.error(`Trip ${tripId} error: ${error}`);
+                    processLogger(`[${tripIdLabel}]:   ${error}`);
                 }
             });
 
             childProcess.on('close', (code) => {
                 clearTimeout(timeout);
                 this.activeProcesses.delete(tripId);
-                processLogger(`Trip ${tripId} process exited with code ${code}`);
-                console.log(`Trip ${tripId} process exited with code ${code}`);
+
 
                 // Handle non-zero exit code if needed
                 if (code !== 0) {
                     this.handleProcessError(tripId, trip);
+                    processLogger(`[${tripIdLabel}]:   Process exited with code ${code}`);
                 }
 
                 // Check if we can launch more trips
@@ -261,10 +262,10 @@ class TripRunner {
                 retries: 0
             });
 
-            processLogger(`Launched processor for trip ${tripId} (${this.activeProcesses.size}/${this.maxConcurrentProcesses} processes active)`);
+            processLogger(`Launched processor for ${tripIdLabel} (${this.activeProcesses.size}/${this.maxConcurrentProcesses} processes active)`);
             return true;
         } catch (error) {
-            processLogger(`Error launching processor for trip ${trip._id}:`, error);
+            processLogger(`Error launching processor for ${tripIdLabel}:`, error);
             await this.handleProcessError(trip._id.toString(), trip);
             return false;
         }
@@ -276,7 +277,7 @@ class TripRunner {
 
         if (processInfo.retries < this.maxRetries) {
             processInfo.retries++;
-            processLogger(`Retrying trip ${tripId} (attempt ${processInfo.retries}/${this.maxRetries})`);
+            processLogger(`Retrying trip ${tripId} [${trip.truckRegistrationNumber}][${trip.tripId}] (attempt ${processInfo.retries}/${this.maxRetries})`);
             await new Promise(resolve => setTimeout(resolve, this.retryDelay));
 
             // Add back to pending queue instead of immediately retrying

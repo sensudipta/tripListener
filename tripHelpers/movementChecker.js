@@ -1,5 +1,5 @@
 const moment = require('moment');
-const { tripLogger } = require('../common/helpers/logger');
+const { tripLogger, processLogger } = require('../common/helpers/logger');
 
 // Constants
 const SPEED_THRESHOLD = 3; // km/h - below this speed, vehicle is considered halted
@@ -94,7 +94,11 @@ function processMovementStatus(trip) {
         return true;
     } catch (error) {
         console.error('Error in processMovementStatus:', error);
-        tripLogger(trip, `#FN:MovCHK: Error processing movement status: ${error.message}`);
+        if (trip) {
+            tripLogger(trip, `#FN:MovCHK: Error processing movement status: ${error.message}`);
+        } else {
+            processLogger(`#FN:MovCHK: Error processing movement status: ${error.message}`);
+        }
         return false;
     }
 }

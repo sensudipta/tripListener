@@ -7,13 +7,16 @@ const getFuel = require('../common/helpers/getFuel');
  * @param {Object} truckPoint - Current truck position
  * @returns {boolean} - Success status
  */
-async function processFuel(trip, truckPoint) {
+async function processFuel(trip) {
     try {
         //check if this vehiclle has fuelLevel in the tripPath, check only last 20 points
+        const truckPoint = trip.tripPath[trip.tripPath.length - 1];
         const last20Points = trip.tripPath.slice(-20);
         const hasFuelLevel = last20Points.some(point => point.fuelLevel !== null);
         if (!hasFuelLevel) {
             return false;
+        } else {
+            tripLogger(trip, `#FN:FuelCHK: Current Fuel level: ${truckPoint.fuelLevel}L`);
         }
 
         // Check if fuel update is needed
@@ -44,7 +47,7 @@ async function processFuel(trip, truckPoint) {
         trip.fuelEvents = fuelEvents || [];
         trip.fuelStatusUpdateTime = truckPoint.dt_tracker;
 
-        tripLogger(trip, `#FN:FuelCHK: Fuel level: ${endVol}L, Consumption: ${consumption}L, Efficiency: ${mileage} km/L`);
+        tripLogger(trip, `#FN:FuelCHK: Fuel Report: ${endVol}L, Consumption: ${consumption}L, Efficiency: ${mileage} km/L`);
         return true;
 
     } catch (error) {

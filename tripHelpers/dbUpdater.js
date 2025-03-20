@@ -48,154 +48,194 @@ async function updateTripRecord(originalTrip, updatedTrip) {
         const isBackdatedTrip = updatedTrip.backDated === true;
 
         // 1. Process regular fields (non-array fields)
-        for (const [key, value] of Object.entries(updatedTrip)) {
-            // Skip static fields and array fields (handled separately)
-            if (STATIC_FIELDS.includes(key) || ARRAY_FIELDS.includes(key)) {
-                continue;
-            }
+        try {
+            for (const [key, value] of Object.entries(updatedTrip)) {
+                // Skip static fields and array fields (handled separately)
+                if (STATIC_FIELDS.includes(key) || ARRAY_FIELDS.includes(key)) {
+                    continue;
+                }
 
-            // Skip null or undefined values
-            if (value === null || value === undefined) {
-                continue;
-            }
+                // Skip null or undefined values
+                if (value === null || value === undefined) {
+                    continue;
+                }
 
-            // For backDated field, set it to false if it was true
-            if (key === 'backDated' && isBackdatedTrip) {
-                setOperations[key] = false;
-                updatedFields.push(`${key}=false`);
-                continue;
-            }
+                // For backDated field, set it to false if it was true
+                if (key === 'backDated' && isBackdatedTrip) {
+                    setOperations[key] = false;
+                    updatedFields.push(`${key}=false`);
+                    continue;
+                }
 
-            // Check if the field has changed
-            try {
-                if (originalTrip[key] === undefined || JSON.stringify(originalTrip[key]) !== JSON.stringify(value)) {
+                // Check if the field has changed
+                try {
+                    if (originalTrip[key] === undefined || JSON.stringify(originalTrip[key]) !== JSON.stringify(value)) {
+                        setOperations[key] = value;
+                        updatedFields.push(key);
+                    }
+                } catch (e) {
+                    // If JSON.stringify fails, just set the value
                     setOperations[key] = value;
                     updatedFields.push(key);
                 }
-            } catch (e) {
-                // If JSON.stringify fails, just set the value
-                setOperations[key] = value;
-                updatedFields.push(key);
             }
+        } catch (fieldProcessError) {
+            tripLogger(updatedTrip, `DB Update ERROR: Failed to process regular fields: ${fieldProcessError.message}`);
         }
 
         // 2. Handle array fields
+        try {
+            // 2.1 Handle tripPath separately - store the operation for later
+            let tripPathUpdate = null;
 
-        // 2.1 Handle tripPath
-        if (updatedTrip.tripPath && Array.isArray(updatedTrip.tripPath)) {
-            if (isBackdatedTrip) {
-                // For backdated trips, set the entire tripPath
-                setOperations.tripPath = updatedTrip.tripPath;
-                updatedFields.push(`tripPath(${updatedTrip.tripPath.length})`);
-            } else if (updatedTrip.pathPoints?.fromIndex !== undefined &&
-                updatedTrip.pathPoints?.toIndex !== undefined) {
-                // For live trips, push only the new points
-                const newPoints = updatedTrip.tripPath.slice(
-                    updatedTrip.pathPoints.fromIndex,
-                    updatedTrip.pathPoints.toIndex + 1
-                );
+            if (updatedTrip.tripPath && Array.isArray(updatedTrip.tripPath)) {
+                const hasTripPath = !!originalTrip.tripPath && originalTrip.tripPath.length > 0;
 
-                if (newPoints.length > 0) {
-                    pushOperations.tripPath = { $each: newPoints };
-                    updatedFields.push(`tripPath+${newPoints.length}`);
+                if (isBackdatedTrip || !originalTrip.tripPath || originalTrip.tripPath.length === 0) {
+                    // Case: Set entire array
+                    tripPathUpdate = {
+                        operation: '$set',
+                        value: updatedTrip.tripPath,
+                        description: `tripPath(${updatedTrip.tripPath.length})`
+                    };
+                }
+                else if (updatedTrip.pathPoints?.fromIndex !== undefined && updatedTrip.pathPoints?.toIndex !== undefined) {
+                    // Case: Push new points
+                    const newPoints = updatedTrip.tripPath.slice(
+                        updatedTrip.pathPoints.fromIndex,
+                        updatedTrip.pathPoints.toIndex + 1
+                    );
+
+                    if (newPoints.length > 0) {
+                        tripPathUpdate = {
+                            operation: '$push',
+                            value: { $each: newPoints },
+                            description: `tripPath+${newPoints.length}`
+                        };
+                    }
                 }
             }
-        }
 
-        // 2.2 Handle significantEvents
-        if (updatedTrip.significantEvents && Array.isArray(updatedTrip.significantEvents)) {
-            setOperations.significantEvents = updatedTrip.significantEvents;
-            updatedFields.push(`significantEvents(${updatedTrip.significantEvents.length})`);
-        }
-
-        // 2.3 Handle sentNotifications
-        if (updatedTrip.sentNotifications && Array.isArray(updatedTrip.sentNotifications)) {
-            // Get only new notifications
-            const lastUpdateTime = originalTrip.updatedAt ? new Date(originalTrip.updatedAt) : new Date(0);
-
-            const newNotifications = updatedTrip.sentNotifications.filter(notification => {
-                if (!notification.sentTime) return false;
-                const notifTime = new Date(notification.sentTime);
-                return notifTime > lastUpdateTime;
-            });
-
-            if (newNotifications.length > 0) {
-                pushOperations.sentNotifications = { $each: newNotifications };
-                updatedFields.push(`sentNotifications+${newNotifications.length}`);
+            // 2.2 Handle significantEvents
+            if (updatedTrip.significantEvents && Array.isArray(updatedTrip.significantEvents)) {
+                setOperations.significantEvents = updatedTrip.significantEvents;
+                updatedFields.push(`significantEvents(${updatedTrip.significantEvents.length})`);
             }
-        }
 
-        // 2.4 Handle segmentHistory
-        if (updatedTrip.segmentHistory && Array.isArray(updatedTrip.segmentHistory)) {
-            setOperations.segmentHistory = updatedTrip.segmentHistory;
-            updatedFields.push(`segmentHistory(${updatedTrip.segmentHistory.length})`);
-        }
+            // 2.3 Handle sentNotifications
+            if (updatedTrip.sentNotifications && Array.isArray(updatedTrip.sentNotifications)) {
+                try {
+                    // Get only new notifications
+                    const lastUpdateTime = originalTrip.updatedAt ? new Date(originalTrip.updatedAt) : new Date(0);
 
-        // 2.5 Handle significantLocations
-        if (updatedTrip.significantLocations && Array.isArray(updatedTrip.significantLocations)) {
-            setOperations.significantLocations = updatedTrip.significantLocations;
-            updatedFields.push(`significantLocations(${updatedTrip.significantLocations.length})`);
-        }
+                    const newNotifications = updatedTrip.sentNotifications.filter(notification => {
+                        if (!notification.sentTime) return false;
+                        const notifTime = new Date(notification.sentTime);
+                        return notifTime > lastUpdateTime;
+                    });
 
-        // 2.6 Handle fuelEvents
-        if (updatedTrip.fuelEvents && Array.isArray(updatedTrip.fuelEvents)) {
-            setOperations.fuelEvents = updatedTrip.fuelEvents;
-            updatedFields.push(`fuelEvents(${updatedTrip.fuelEvents.length})`);
-        }
-
-        // Build the final update operation
-        if (Object.keys(setOperations).length > 0) {
-            updateOperations.$set = setOperations;
-        }
-
-        if (Object.keys(pushOperations).length > 0) {
-            updateOperations.$push = pushOperations;
-        }
-
-        // If no updates to perform, return true
-        if (Object.keys(updateOperations).length === 0) {
-            return true;
-        }
-
-        // Log what we're updating
-        if (updatedFields.length > 0) {
-            tripLogger(updatedTrip, `DB Update: ${updatedFields.join(', ')}`);
-        }
-
-        // Perform the update with retries
-        let retryCount = 0;
-        const MAX_RETRIES = 3;
-
-        while (retryCount < MAX_RETRIES) {
-            try {
-                const result = await Trip.updateOne(
-                    { _id: updatedTrip._id },
-                    updateOperations,
-                    { runValidators: true }
-                );
-
-                if (result.matchedCount === 0) {
-                    throw new Error('Trip not found');
+                    if (newNotifications.length > 0) {
+                        pushOperations.sentNotifications = { $each: newNotifications };
+                        updatedFields.push(`sentNotifications+${newNotifications.length}`);
+                    }
+                } catch (notifError) {
+                    tripLogger(updatedTrip, `DB Update ERROR: Failed to process notifications: ${notifError.message}`);
                 }
+            }
 
-                return true;
-            } catch (dbError) {
-                retryCount++;
-                tripLogger(updatedTrip, `DB Update Retry ${retryCount}: ${dbError.message}`);
+            // 2.4 Handle segmentHistory
+            if (updatedTrip.segmentHistory && Array.isArray(updatedTrip.segmentHistory)) {
+                setOperations.segmentHistory = updatedTrip.segmentHistory;
+                updatedFields.push(`segmentHistory(${updatedTrip.segmentHistory.length})`);
+            }
 
-                if (retryCount >= MAX_RETRIES) {
+            // 2.5 Handle significantLocations
+            if (updatedTrip.significantLocations && Array.isArray(updatedTrip.significantLocations)) {
+                setOperations.significantLocations = updatedTrip.significantLocations;
+                updatedFields.push(`significantLocations(${updatedTrip.significantLocations.length})`);
+            }
+
+            // 2.6 Handle fuelEvents
+            if (updatedTrip.fuelEvents && Array.isArray(updatedTrip.fuelEvents)) {
+                setOperations.fuelEvents = updatedTrip.fuelEvents;
+                updatedFields.push(`fuelEvents(${updatedTrip.fuelEvents.length})`);
+            }
+
+            // Safety check for any potential conflicts
+            if (setOperations.tripPath) {
+                delete setOperations.tripPath;
+                updatedFields = updatedFields.filter(field => !field.startsWith('tripPath'));
+            }
+            if (pushOperations.tripPath) {
+                delete pushOperations.tripPath;
+                updatedFields = updatedFields.filter(field => !field.startsWith('tripPath'));
+            }
+
+            // Build the first update operation (explicitly excluding tripPath)
+            if (Object.keys(setOperations).length > 0) {
+                updateOperations.$set = setOperations;
+            }
+
+            if (Object.keys(pushOperations).length > 0) {
+                updateOperations.$push = pushOperations;
+            }
+
+            // First update: handle all non-tripPath fields
+            if (Object.keys(updateOperations).length > 0) {
+                try {
+                    // Simplified logging - just the fields being updated
+                    tripLogger(updatedTrip, `DB Update (Phase 1): ${updatedFields.join(', ')}`);
+
+                    const result = await Trip.updateOne(
+                        { _id: updatedTrip._id },
+                        updateOperations,
+                        { runValidators: true }
+                    );
+
+                    if (result.matchedCount === 0) {
+                        tripLogger(updatedTrip, `DB Update ERROR: Trip not found in Phase 1`);
+                        throw new Error('Trip not found');
+                    }
+                } catch (dbError) {
+                    tripLogger(updatedTrip, `DB Update ERROR in Phase 1: ${dbError.message}`);
                     throw dbError;
                 }
-
-                // Exponential backoff
-                await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
             }
-        }
 
-        return false;
+            // Second update: handle tripPath separately if needed
+            if (tripPathUpdate) {
+                try {
+                    tripLogger(updatedTrip, `DB Update (Phase 2): ${tripPathUpdate.description}`);
+
+                    const tripPathUpdateOp = {};
+                    tripPathUpdateOp[tripPathUpdate.operation] = {
+                        tripPath: tripPathUpdate.value
+                    };
+
+                    const result = await Trip.updateOne(
+                        { _id: updatedTrip._id },
+                        tripPathUpdateOp,
+                        { runValidators: true }
+                    );
+
+                    if (result.matchedCount === 0) {
+                        tripLogger(updatedTrip, `DB Update ERROR: Trip not found in Phase 2`);
+                        throw new Error('Trip not found in tripPath update');
+                    }
+                } catch (dbError) {
+                    tripLogger(updatedTrip, `DB Update ERROR in Phase 2: ${dbError.message}`);
+                    // Continue even if tripPath update fails
+                }
+            }
+
+            return true;
+        } catch (err) {
+            tripLogger(updatedTrip, `DB Update ERROR: ${err.message}`);
+            throw err;
+        }
     } catch (err) {
-        tripLogger(updatedTrip, `DB Update Error: ${err.message}`);
-        console.error(`Failed to update trip ${updatedTrip._id}:`, err);
+        tripLogger(updatedTrip, `DB Update ERROR: ${err.message}`);
+        console.error(`Failed to update trip ${updatedTrip?._id || 'unknown'}:`, err);
         return false;
     }
 }

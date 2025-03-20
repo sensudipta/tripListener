@@ -1,5 +1,5 @@
 const moment = require('moment');
-const { tripLogger } = require('../common/helpers/logger');
+const { tripLogger, processLogger } = require('../common/helpers/logger');
 const { getLengthBetweenPoints } = require('../common/helpers/helper');
 
 /**
@@ -107,7 +107,11 @@ function calculatePathMetrics(trip) {
 
     } catch (error) {
         console.error('Error in calculatePathMetrics:', error);
-        tripLogger(trip, `#FN:PathMetrics: Error calculating metrics: ${error.message}`);
+        if (trip) {
+            tripLogger(trip, `#FN:PathMetrics: Error calculating metrics: ${error.message}`);
+        } else {
+            processLogger(`#FN:PathMetrics: Error calculating metrics: ${error.message}`);
+        }
         return false;
     }
 }

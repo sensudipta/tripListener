@@ -7,7 +7,6 @@ const { initializeConnections, cleanup } = require('./common/helpers/dbConnector
 
 // Import all helper functions
 const getTripPath = require('./tripHelpers/getLiveTripPath');
-const getBackdatedTripPath = require('./tripHelpers/getBackdatedTripPath');
 const movementChecker = require('./tripHelpers/movementChecker');
 const pathMetricsCalculator = require('./tripHelpers/pathMetricsCalculator');
 const locationChecker = require('./tripHelpers/locationChecker');
@@ -69,6 +68,9 @@ async function main() {
 // Process planned or start delayed trips
 async function processPlannedTrip(trip) {
     try {
+        // Create a deep copy of the original trip (for database update comparison)
+        const originalTrip = JSON.parse(JSON.stringify(trip));
+
         // Check if planned start time has elapsed
         if (moment().isBefore(trip.plannedStartTime)) {
             tripLogger(trip, "Planned start time not reached yet");
@@ -100,15 +102,13 @@ async function processPlannedTrip(trip) {
         const originalTripStage = trip.tripStage;
         const originalActiveStatus = trip.activeStatus;
 
-        // Determine trip stage based on location
-        const updates = {
-            lastCheckTime: new Date()
-        };
+        // Update the trip object directly instead of creating a separate updates object
+        trip.lastCheckTime = new Date();
 
         if (location.currentSignificantLocation?.locationId === trip.route.startLocation._id) {
-            updates.tripStage = 'Active';
-            updates.actualStartTime = truckPoint.dt_tracker;
-            updates.activeStatus = 'Active';
+            trip.tripStage = 'Active';
+            trip.actualStartTime = truckPoint.dt_tracker;
+            trip.activeStatus = 'Active';
 
             // Send activation alert
             const alertEvent = {
@@ -116,10 +116,10 @@ async function processPlannedTrip(trip) {
                 eventText: 'Trip Activated',
                 eventTime: truckPoint.dt_tracker
             };
-            await alertSender({ ...trip, ...updates }, alertEvent, 'tripStage');
+            await alertSender(trip, alertEvent, 'tripStage');
         } else {
-            updates.tripStage = 'Start Delayed';
-            updates.activeStatus = 'Delayed';
+            trip.tripStage = 'Start Delayed';
+            trip.activeStatus = 'Delayed';
 
             // Send delay alert if status changed
             if (originalTripStage !== 'Start Delayed') {
@@ -128,13 +128,14 @@ async function processPlannedTrip(trip) {
                     eventText: 'Trip Start Delayed',
                     eventTime: new Date()
                 };
-                await alertSender({ ...trip, ...updates }, alertEvent, 'tripStage');
+                await alertSender(trip, alertEvent, 'tripStage');
             }
         }
 
-        // Update trip record
-        await updateTripRecord(trip, updates);
-        tripLogger(trip, `Planned trip processing completed. New stage: ${updates.tripStage}`);
+        // Update trip record using the original and modified trip
+        await updateTripRecord(originalTrip, trip);
+
+        tripLogger(trip, `Planned trip processing completed. New stage: ${trip.tripStage}`);
 
     } catch (error) {
         tripLogger(trip, `Error processing planned trip: ${error}`);
@@ -145,10 +146,12 @@ async function processPlannedTrip(trip) {
 // Process active trips
 async function processActiveTrip(trip) {
     try {
+        // Create a deep copy of the original trip for database update comparison
+        const originalTrip = JSON.parse(JSON.stringify(trip));
+
         // Define processing steps
         const steps = [
             { name: 'getTripPath', func: getTripPath },
-            { name: 'getBackdatedTripPath', func: getBackdatedTripPath },
             { name: 'movementChecker', func: movementChecker },
             { name: 'pathMetricsCalculator', func: pathMetricsCalculator },
             { name: 'locationChecker', func: locationChecker },
@@ -156,17 +159,15 @@ async function processActiveTrip(trip) {
             { name: 'fuelChecker', func: fuelChecker },
             { name: 'checkRules', func: checkRules },
             { name: 'statusChecker', func: statusChecker },
-            { name: 'alertSender', func: alertSender },
-            { name: 'dbUpdater', func: updateTripRecord }
+            { name: 'alertSender', func: alertSender }
         ];
 
-        let tripData = { ...trip };
-
-        // Execute each step sequentially
+        // Execute each step sequentially - use the original trip object directly
         for (const step of steps) {
             try {
                 tripLogger(trip, `Starting ${step.name}`);
-                tripData = await executeStep(step, tripData);
+                // Pass the original trip object to each step
+                const success = await executeStep(step, trip);
                 tripLogger(trip, `Completed ${step.name}`);
             } catch (error) {
                 tripLogger(trip, `Error in ${step.name}: ${error}`);
@@ -174,9 +175,12 @@ async function processActiveTrip(trip) {
             }
         }
 
+        // Update the database with changes
+        await updateTripRecord(originalTrip, trip);
+
         // Check if trip needs to be finished
-        if (tripData.tripStage === 'Completed') {
-            await finishTrip(tripData);
+        if (trip.tripStage === 'Completed') {
+            await finishTrip(trip);
         }
 
     } catch (error) {
@@ -197,6 +201,7 @@ async function executeStep(step, tripData) {
         if (step.name === 'alertSender') {
             // Skip the generic alertSender step - we'll handle alerts specifically
             tripLogger(tripData, `Skipping generic alertSender step`);
+            return true;
         } else {
             // Most helper functions modify the tripData object directly and return true/false
             const success = await step.func(tripData);
@@ -205,19 +210,17 @@ async function executeStep(step, tripData) {
                 tripLogger(tripData, `Warning: ${step.name} returned false, indicating possible failure`);
                 // We continue processing despite the warning
             }
-        }
 
-        // Send alerts for changes (except after alertSender to avoid duplicates)
-        if (step.name !== 'alertSender' && step.name !== 'dbUpdater') {
+            // Send alerts for changes
             await sendAlertsForChanges(
                 tripData,
                 originalTripStage,
                 originalActiveStatus,
                 originalRuleStatus
             );
-        }
 
-        return tripData;
+            return success;
+        }
     } catch (error) {
         tripLogger(tripData, `Error in ${step.name}: ${error}`);
         throw error;
